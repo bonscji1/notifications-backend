@@ -1,6 +1,7 @@
 package com.redhat.cloud.notifications.db.repositories;
 
 import com.redhat.cloud.notifications.Severity;
+import com.redhat.cloud.notifications.config.BackendConfig;
 import com.redhat.cloud.notifications.db.Query;
 import com.redhat.cloud.notifications.db.Sort;
 import com.redhat.cloud.notifications.models.CompositeEndpointType;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @ApplicationScoped
 public class EventRepository {
@@ -33,13 +35,21 @@ public class EventRepository {
     @Inject
     RecipientsAuthorizationCriterionExtractor recipientsAuthorizationCriterionExtractor;
 
+    @Inject
+    BackendConfig backendConfig;
+
     public List<EventAuthorizationCriterion> getEventsWithCriterion(String orgId, Set<UUID> bundleIds, Set<UUID> appIds, String eventTypeDisplayName,
                                                                     LocalDate startDate, LocalDate endDate, Set<EndpointType> endpointTypes, Set<CompositeEndpointType> compositeEndpointTypes,
                                                                     Set<Boolean> invocationResults, Set<NotificationStatus> status) {
 
+        boolean useNormalized = backendConfig.isNormalizedQueriesEnabled(orgId);
+        boolean bundlesNotEmpty = bundleIds != null && !bundleIds.isEmpty();
+        boolean applicationsNotEmpty = appIds != null && !appIds.isEmpty();
+        boolean eventTypeNameNotEmpty = eventTypeDisplayName != null;
+
         String hql = "FROM Event e WHERE e.orgId = :orgId";
 
-        hql = addHqlConditions(hql, bundleIds, appIds, eventTypeDisplayName, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, null, Optional.empty(), true);
+        hql = addHqlConditions(hql, useNormalized, bundlesNotEmpty, applicationsNotEmpty, eventTypeNameNotEmpty, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, null, Optional.empty(), true);
         // we are looking for events with auth criterion only
         hql += " AND e.hasAuthorizationCriterion is true";
 
@@ -59,36 +69,86 @@ public class EventRepository {
                                       Set<Boolean> invocationResults, boolean fetchNotificationHistory, Set<NotificationStatus> status, Set<Severity> severities, Query query,
                                       Optional<List<UUID>> uuidToExclude, boolean includeEventsWithAuthCriterion) {
 
-        Optional<Sort> sort = Sort.getSort(query, "created:DESC", Event.SORT_FIELDS);
+        boolean useNormalized = backendConfig.isNormalizedQueriesEnabled(orgId);
+        Optional<Sort> sort = Sort.getSort(query, "created:DESC", Event.getSortFields(useNormalized));
 
         List<UUID> eventIds = getEventIds(orgId, bundleIds, appIds, eventTypeDisplayName, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, severities, query, uuidToExclude, includeEventsWithAuthCriterion);
         if (eventIds.isEmpty()) {
             return new ArrayList<>();
         }
 
+        boolean needsJoins = useNormalized && sort.isPresent() &&
+            !sort.get().getSortColumn().equals("e.created");
+
         String hql;
         if (fetchNotificationHistory) {
-            hql = "SELECT DISTINCT e FROM Event e LEFT JOIN FETCH e.historyEntries he WHERE e.id IN (:eventIds)";
+            if (useNormalized) {
+                // Remove DISTINCT to allow ORDER BY with joined columns
+                // Deduplication happens naturally since we're fetching by specific event IDs
+                hql = "SELECT e FROM Event e ";
+                if (needsJoins) {
+                    hql += "JOIN e.eventType et JOIN et.application app JOIN app.bundle bundle ";
+                }
+                hql += "LEFT JOIN FETCH e.historyEntries he WHERE e.id IN (:eventIds)";
+            } else {
+                hql = "SELECT DISTINCT e FROM Event e LEFT JOIN FETCH e.historyEntries he WHERE e.id IN (:eventIds)";
+            }
         } else {
-            hql = "FROM Event e WHERE e.id IN (:eventIds)";
+            hql = "FROM Event e ";
+            if (needsJoins) {
+                hql += "JOIN e.eventType et JOIN et.application app JOIN app.bundle bundle ";
+            }
+            hql += "WHERE e.id IN (:eventIds)";
         }
 
         if (sort.isPresent()) {
             hql += getOrderBy(sort.get());
         }
 
-        return entityManager.createQuery(hql, Event.class)
+        List<Event> events = entityManager.createQuery(hql, Event.class)
                 .setParameter("eventIds", eventIds)
                 .getResultList();
+
+        // LEFT JOIN FETCH on one-to-many can create duplicate Event objects
+        // Only deduplicate for normalized queries (denormalized already has SQL DISTINCT)
+        if (fetchNotificationHistory && useNormalized && !events.isEmpty()) {
+            return events.stream()
+                    .distinct()
+                    .collect(Collectors.toList());
+        }
+
+        return events;
     }
 
     public Long count(String orgId, Set<UUID> bundleIds, Set<UUID> appIds, String eventTypeDisplayName,
                       LocalDate startDate, LocalDate endDate, Set<EndpointType> endpointTypes,
                       Set<CompositeEndpointType> compositeEndpointTypes, Set<Boolean> invocationResults,
                       Set<NotificationStatus> status, Set<Severity> severities, Optional<List<UUID>> uuidToExclude, Boolean includeEventsWithAuthCriterion) {
-        String hql = "SELECT COUNT(*) FROM Event e WHERE e.orgId = :orgId";
+        boolean useNormalized = backendConfig.isNormalizedQueriesEnabled(orgId);
 
-        hql = addHqlConditions(hql, bundleIds, appIds, eventTypeDisplayName, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, severities, uuidToExclude, includeEventsWithAuthCriterion);
+        // Calculate once for reuse
+        boolean bundlesNotEmpty = bundleIds != null && !bundleIds.isEmpty();
+        boolean applicationsNotEmpty = appIds != null && !appIds.isEmpty();
+        boolean eventTypeNameNotEmpty = eventTypeDisplayName != null;
+
+        String hql = "SELECT COUNT(*) FROM Event e ";
+
+        // Add selective JOINs for normalized approach - only join what we need
+        if (useNormalized && (bundlesNotEmpty || applicationsNotEmpty || eventTypeNameNotEmpty)) {
+            hql += "JOIN e.eventType et ";
+
+            if (bundlesNotEmpty || applicationsNotEmpty) {
+                hql += "JOIN et.application app ";
+            }
+
+            if (bundlesNotEmpty) {
+                hql += "JOIN app.bundle bundle ";
+            }
+        }
+
+        hql += "WHERE e.orgId = :orgId";
+
+        hql = addHqlConditions(hql, useNormalized, bundlesNotEmpty, applicationsNotEmpty, eventTypeNameNotEmpty, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, severities, uuidToExclude, includeEventsWithAuthCriterion);
 
         TypedQuery<Long> query = entityManager.createQuery(hql, Long.class);
         setQueryParams(query, orgId, bundleIds, appIds, eventTypeDisplayName, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, severities, uuidToExclude);
@@ -107,10 +167,28 @@ public class EventRepository {
     private List<UUID> getEventIds(String orgId, Set<UUID> bundleIds, Set<UUID> appIds, String eventTypeDisplayName,
                                         LocalDate startDate, LocalDate endDate, Set<EndpointType> endpointTypes, Set<CompositeEndpointType> compositeEndpointTypes,
                                         Set<Boolean> invocationResults, Set<NotificationStatus> status, Set<Severity> severities, Query query, Optional<List<UUID>> uuidToExclude, boolean includeEventsWithAuthCriterion) {
-        String hql = "SELECT e.id FROM Event e WHERE e.orgId = :orgId";
+        boolean useNormalized = backendConfig.isNormalizedQueriesEnabled(orgId);
+        boolean bundlesNotEmpty = bundleIds != null && !bundleIds.isEmpty();
+        boolean applicationsNotEmpty = appIds != null && !appIds.isEmpty();
+        boolean eventTypeNameNotEmpty = eventTypeDisplayName != null;
+        Optional<Sort> sort = Sort.getSort(query, "created:DESC", Event.getSortFields(useNormalized));
 
-        hql = addHqlConditions(hql, bundleIds, appIds, eventTypeDisplayName, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, severities, uuidToExclude, includeEventsWithAuthCriterion);
-        Optional<Sort> sort = Sort.getSort(query, "created:DESC", Event.SORT_FIELDS);
+        String hql = "SELECT e.id FROM Event e ";
+
+        boolean needsJoins = useNormalized && (
+            (sort.isPresent() && !sort.get().getSortColumn().equals("e.created")) ||
+            bundlesNotEmpty ||
+            applicationsNotEmpty ||
+            eventTypeNameNotEmpty
+        );
+
+        if (needsJoins) {
+            hql += "JOIN e.eventType et JOIN et.application app JOIN app.bundle bundle ";
+        }
+
+        hql += "WHERE e.orgId = :orgId";
+
+        hql = addHqlConditions(hql, useNormalized, bundlesNotEmpty, applicationsNotEmpty, eventTypeNameNotEmpty, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, severities, uuidToExclude, includeEventsWithAuthCriterion);
 
         if (sort.isPresent()) {
             hql += getOrderBy(sort.get());
@@ -127,7 +205,7 @@ public class EventRepository {
         return typedQuery.getResultList();
     }
 
-    private static String addHqlConditions(String hql, Set<UUID> bundleIds, Set<UUID> appIds, String eventTypeDisplayName,
+    private String addHqlConditions(String hql, boolean useNormalized, boolean bundlesNotEmpty, boolean applicationsNotEmpty, boolean eventTypeNameNotEmpty,
                                            LocalDate startDate, LocalDate endDate, Set<EndpointType> endpointTypes,
                                            Set<CompositeEndpointType> compositeEndpointTypes, Set<Boolean> invocationResults,
                                            Set<NotificationStatus> status, Set<Severity> severities, Optional<List<UUID>> uuidToExclude, boolean includeEventsWithAuthCriterion) {
@@ -137,19 +215,31 @@ public class EventRepository {
         if (uuidToExclude.isPresent()) {
             bundleOrAppsConditions.add("e.id NOT IN (:uuidToExclude)");
         }
-        if (bundleIds != null && !bundleIds.isEmpty()) {
-            bundleOrAppsConditions.add("e.bundleId IN (:bundleIds)");
+        if (bundlesNotEmpty) {
+            if (useNormalized) {
+                bundleOrAppsConditions.add("bundle.id IN (:bundleIds)");
+            } else {
+                bundleOrAppsConditions.add("e.bundleId IN (:bundleIds)");
+            }
         }
-        if (appIds != null && !appIds.isEmpty()) {
-            bundleOrAppsConditions.add("e.applicationId IN (:appIds)");
+        if (applicationsNotEmpty) {
+            if (useNormalized) {
+                bundleOrAppsConditions.add("app.id IN (:appIds)");
+            } else {
+                bundleOrAppsConditions.add("e.applicationId IN (:appIds)");
+            }
         }
 
         if (bundleOrAppsConditions.size() > 0) {
             hql += " AND (" + String.join(" OR ", bundleOrAppsConditions) + ")";
         }
 
-        if (eventTypeDisplayName != null) {
-            hql += " AND LOWER(e.eventTypeDisplayName) LIKE :eventTypeDisplayName";
+        if (eventTypeNameNotEmpty) {
+            if (useNormalized) {
+                hql += " AND LOWER(e.eventType.displayName) LIKE :eventTypeDisplayName";
+            } else {
+                hql += " AND LOWER(e.eventTypeDisplayName) LIKE :eventTypeDisplayName";
+            }
         }
         if (startDate != null && endDate != null) {
             hql += " AND e.created BETWEEN :startDate AND :endDate";

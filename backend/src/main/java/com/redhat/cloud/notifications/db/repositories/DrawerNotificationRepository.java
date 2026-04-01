@@ -1,5 +1,6 @@
 package com.redhat.cloud.notifications.db.repositories;
 
+import com.redhat.cloud.notifications.config.BackendConfig;
 import com.redhat.cloud.notifications.db.Query;
 import com.redhat.cloud.notifications.db.Sort;
 import com.redhat.cloud.notifications.models.DrawerEntryPayload;
@@ -23,6 +24,9 @@ public class DrawerNotificationRepository {
     @Inject
     EntityManager entityManager;
 
+    @Inject
+    BackendConfig backendConfig;
+
     @Transactional
     public Integer updateReadStatus(String orgId, String username, Set<UUID> notificationIds, Boolean readStatus) {
 
@@ -40,13 +44,32 @@ public class DrawerNotificationRepository {
     public List<DrawerEntryPayload> getNotifications(String orgId, String username, Set<UUID> bundleIds, Set<UUID> appIds, Set<UUID> eventTypeIds,
                                               LocalDateTime startDate, LocalDateTime endDate, Boolean readStatus, Query query) {
 
-        Optional<Sort> sort = Sort.getSort(query, "created:DESC", DrawerNotification.SORT_FIELDS);
+        boolean useNormalized = backendConfig.isNormalizedQueriesEnabled(orgId);
+        Optional<Sort> sort = Sort.getSort(query, "created:DESC", DrawerNotification.getSortFields(useNormalized));
 
-        String hql = "SELECT dn.id.eventId, dn.read, " +
-            "dn.event.bundleDisplayName, dn.event.applicationDisplayName, dn.event.eventTypeDisplayName, dn.created, dn.event.renderedDrawerNotification, bundle.name, dn.event.severity "
-            + "FROM DrawerNotification dn join Bundle bundle on dn.event.bundleId = bundle.id where dn.id.orgId = :orgId and dn.id.userId = :userid";
+        // Calculate once for reuse
+        boolean bundlesNotEmpty = bundleIds != null && !bundleIds.isEmpty();
+        boolean applicationsNotEmpty = appIds != null && !appIds.isEmpty();
+        boolean eventTypesNotEmpty = eventTypeIds != null && !eventTypeIds.isEmpty();
 
-        hql = addHqlConditions(hql, bundleIds, appIds, eventTypeIds, startDate, endDate, readStatus);
+        String hql;
+        if (useNormalized) {
+            hql = "SELECT dn.id.eventId, dn.read, " +
+                "bundle.displayName, app.displayName, et.displayName, dn.created, dn.event.renderedDrawerNotification, bundle.name, dn.event.severity " +
+                "FROM DrawerNotification dn " +
+                "JOIN dn.event e " +
+                "JOIN e.eventType et " +
+                "JOIN et.application app " +
+                "JOIN app.bundle bundle " +
+                "WHERE dn.id.orgId = :orgId AND dn.id.userId = :userid";
+        } else {
+            hql = "SELECT dn.id.eventId, dn.read, " +
+                "dn.event.bundleDisplayName, dn.event.applicationDisplayName, dn.event.eventTypeDisplayName, dn.created, dn.event.renderedDrawerNotification, bundle.name, dn.event.severity " +
+                "FROM DrawerNotification dn JOIN Bundle bundle ON dn.event.bundleId = bundle.id " +
+                "WHERE dn.id.orgId = :orgId AND dn.id.userId = :userid";
+        }
+
+        hql = addHqlConditions(hql, useNormalized, bundlesNotEmpty, applicationsNotEmpty, eventTypesNotEmpty, startDate, endDate, readStatus);
         if (sort.isPresent()) {
             hql += getOrderBy(sort.get());
         }
@@ -65,10 +88,32 @@ public class DrawerNotificationRepository {
 
     public Long count(String orgId, String username, Set<UUID> bundleIds, Set<UUID> appIds, Set<UUID> eventTypeIds,
                       LocalDateTime startDate, LocalDateTime endDate, Boolean readStatus) {
-        String hql = "SELECT count(dn.id.userId) FROM DrawerNotification dn "
-                        + "where dn.id.orgId = :orgId and dn.id.userId = :userid";
+        boolean useNormalized = backendConfig.isNormalizedQueriesEnabled(orgId);
 
-        hql = addHqlConditions(hql, bundleIds, appIds, eventTypeIds, startDate, endDate, readStatus);
+        // Calculate once for reuse
+        boolean bundlesNotEmpty = bundleIds != null && !bundleIds.isEmpty();
+        boolean applicationsNotEmpty = appIds != null && !appIds.isEmpty();
+        boolean eventTypesNotEmpty = eventTypeIds != null && !eventTypeIds.isEmpty();
+
+        String hql = "SELECT count(dn.id.userId) FROM DrawerNotification dn ";
+
+        // Add selective JOINs for normalized approach - only join what we need
+        if (useNormalized && (bundlesNotEmpty || applicationsNotEmpty || eventTypesNotEmpty)) {
+            hql += "JOIN dn.event e ";
+            hql += "JOIN e.eventType et ";
+
+            if (bundlesNotEmpty || applicationsNotEmpty) {
+                hql += "JOIN et.application app ";
+            }
+
+            if (bundlesNotEmpty) {
+                hql += "JOIN app.bundle bundle ";
+            }
+        }
+
+        hql += "WHERE dn.id.orgId = :orgId AND dn.id.userId = :userid";
+
+        hql = addHqlConditions(hql, useNormalized, bundlesNotEmpty, applicationsNotEmpty, eventTypesNotEmpty, startDate, endDate, readStatus);
 
         TypedQuery<Long> typedQuery = entityManager.createQuery(hql, Long.class);
         setQueryParams(typedQuery, orgId, username, bundleIds, appIds, eventTypeIds, startDate, endDate, readStatus);
@@ -76,7 +121,8 @@ public class DrawerNotificationRepository {
         return typedQuery.getSingleResult();
     }
 
-    private static String addHqlConditions(String hql, Set<UUID> bundleIds, Set<UUID> appIds, Set<UUID> eventTypeIds,
+    private static String addHqlConditions(String hql, boolean useNormalized,
+                                           boolean bundlesNotEmpty, boolean applicationsNotEmpty, boolean eventTypesNotEmpty,
                                            LocalDateTime startDate, LocalDateTime endDate, Boolean readStatus) {
 
         if (startDate != null && endDate != null) {
@@ -91,23 +137,28 @@ public class DrawerNotificationRepository {
             hql += " AND dn.read = :readStatus";
         }
 
-        boolean eventTypesNotEmpty = (eventTypeIds != null && !eventTypeIds.isEmpty());
-        boolean applicationsNotEmpty = (appIds != null && !appIds.isEmpty());
-        boolean bundlesNotEmpty = (bundleIds != null && !bundleIds.isEmpty());
-
-        if (eventTypesNotEmpty ||
-            applicationsNotEmpty ||
-            bundlesNotEmpty) {
-
+        if (!useNormalized) {
             // add org id as criteria on event table to allow usage of
             // index ix_event_org_id_bundle_id_application_id_event_type_display_nam
             hql += " AND dn.event.orgId = :orgId";
+        }
 
-            if (eventTypesNotEmpty) {
+        if (eventTypesNotEmpty) {
+            if (useNormalized) {
+                hql += " AND et.id IN (:eventTypeIds)";
+            } else {
                 hql += " AND dn.event.eventType.id IN (:eventTypeIds)";
-            } else if (applicationsNotEmpty) {
+            }
+        } else if (applicationsNotEmpty) {
+            if (useNormalized) {
+                hql += " AND app.id IN (:appIds)";
+            } else {
                 hql += " AND dn.event.applicationId IN (:appIds)";
-            } else if (bundlesNotEmpty) {
+            }
+        } else if (bundlesNotEmpty) {
+            if (useNormalized) {
+                hql += " AND bundle.id IN (:bundleIds)";
+            } else {
                 hql += " AND dn.event.bundleId IN (:bundleIds)";
             }
         }

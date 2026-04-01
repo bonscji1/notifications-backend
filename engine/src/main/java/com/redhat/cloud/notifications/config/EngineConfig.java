@@ -63,6 +63,7 @@ public class EngineConfig {
     private String toggleIncludeSeverityToFilterRecipients;
     private String toggleSkipProcessingMessagesOnReplayService;
     private String toggleSubscriptionsDeduplicationWillBeNotified;
+    private String normalizedQueriesToggle;
 
     @ConfigProperty(name = UNLEASH, defaultValue = "false")
     @Deprecated(forRemoval = true, since = "To be removed when we're done migrating to Unleash in all environments")
@@ -172,6 +173,7 @@ public class EngineConfig {
         toggleIncludeSeverityToFilterRecipients = toggleRegistry.register("include-severity-to-filter-recipients", true);
         toggleSkipProcessingMessagesOnReplayService = toggleRegistry.register("skip-processing-on-replay-service", true);
         toggleSubscriptionsDeduplicationWillBeNotified = toggleRegistry.register("subscriptions-deduplication-will-be-notified", true);
+        normalizedQueriesToggle = toggleRegistry.register("normalized-queries", true);
     }
 
     void logConfigAtStartup(@Observes Startup event) {
@@ -367,6 +369,14 @@ public class EngineConfig {
     public boolean isSubscriptionsDeduplicationWillBeNotifiedEnabled(String orgId) {
         if (unleashEnabled) {
             return unleash.isEnabled(toggleSubscriptionsDeduplicationWillBeNotified, UnleashContextBuilder.buildUnleashContextWithOrgId(orgId), false);
+        } else {
+            return false;
+        }
+    }
+
+    public boolean isNormalizedQueriesEnabled(String orgId) {
+        if (unleashEnabled) {
+            return unleash.isEnabled(normalizedQueriesToggle, UnleashContextBuilder.buildUnleashContextWithOrgId(orgId), false);
         } else {
             return false;
         }

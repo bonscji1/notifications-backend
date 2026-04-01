@@ -45,6 +45,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 import org.project_kessel.api.inventory.v1beta2.Allowed;
@@ -159,10 +160,11 @@ public class EventResourceTest extends DbIsolatedTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void shouldNotBeAllowedTogetEventLogsWhenUserHasNotificationsAccessRightsOnly(boolean kesselEnabled) {
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void shouldNotBeAllowedToGetEventLogsWhenUserHasNotificationsAccessRightsOnly(boolean kesselEnabled, boolean useNormalizedQueries) {
 
         when(backendConfig.isKesselEnabled(anyString())).thenReturn(kesselEnabled);
+        when(backendConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
         if (kesselEnabled) {
             mockKesselPermission(DEFAULT_ORG_ID, "non-default-user", EVENTS_VIEW, ALLOWED_FALSE);
         }
@@ -176,10 +178,11 @@ public class EventResourceTest extends DbIsolatedTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void testAllQueryParams(boolean kesselEnabled) {
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testAllQueryParams(boolean kesselEnabled, boolean useNormalizedQueries) {
 
         when(backendConfig.isKesselEnabled(anyString())).thenReturn(kesselEnabled);
+        when(backendConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
         if (kesselEnabled) {
             mockDefaultKesselPermission(EVENTS_VIEW, ALLOWED_TRUE);
             when(workspaceUtils.getDefaultWorkspaceId(OTHER_ORG_ID)).thenReturn(UUID.randomUUID());
@@ -696,10 +699,11 @@ public class EventResourceTest extends DbIsolatedTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void testInsufficientPrivileges(boolean kesselEnabled) {
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testInsufficientPrivileges(boolean kesselEnabled, boolean useNormalizedQueries) {
 
         when(backendConfig.isKesselEnabled(anyString())).thenReturn(kesselEnabled);
+        when(backendConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
         if (kesselEnabled) {
             mockKesselPermission(DEFAULT_ORG_ID, DEFAULT_USER + "no-access", EVENTS_VIEW, ALLOWED_FALSE);
         }
@@ -713,10 +717,11 @@ public class EventResourceTest extends DbIsolatedTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void testInvalidSortBy(boolean kesselEnabled) {
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testInvalidSortBy(boolean kesselEnabled, boolean useNormalizedQueries) {
 
         when(backendConfig.isKesselEnabled(anyString())).thenReturn(kesselEnabled);
+        when(backendConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
         if (kesselEnabled) {
             mockDefaultKesselPermission(EVENTS_VIEW, ALLOWED_TRUE);
         }
@@ -733,10 +738,11 @@ public class EventResourceTest extends DbIsolatedTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void testInvalidLimit(boolean kesselEnabled) {
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testInvalidLimit(boolean kesselEnabled, boolean useNormalizedQueries) {
 
         when(backendConfig.isKesselEnabled(anyString())).thenReturn(kesselEnabled);
+        when(backendConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
         if (kesselEnabled) {
             mockDefaultKesselPermission(EVENTS_VIEW, ALLOWED_TRUE);
         }
@@ -760,10 +766,11 @@ public class EventResourceTest extends DbIsolatedTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void shouldBeAllowedToGetEventLogs(boolean kesselEnabled) {
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void shouldBeAllowedToGetEventLogs(boolean kesselEnabled, boolean useNormalizedQueries) {
 
         when(backendConfig.isKesselEnabled(anyString())).thenReturn(kesselEnabled);
+        when(backendConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
         if (kesselEnabled) {
             mockDefaultKesselPermission(EVENTS_VIEW, ALLOWED_TRUE);
         }
@@ -1017,9 +1024,11 @@ public class EventResourceTest extends DbIsolatedTest {
         }
     }
 
-    @Test
-    void testEventsWithKesselCriterion() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testEventsWithKesselCriterion(boolean useNormalizedQueries) {
         when(backendConfig.isKesselChecksOnEventLogEnabled(anyString())).thenReturn(true);
+        when(backendConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
 
         Header defaultIdentityHeader = mockRbac(DEFAULT_ACCOUNT_ID, DEFAULT_ORG_ID, DEFAULT_USER, FULL_ACCESS);
 
@@ -1135,8 +1144,10 @@ public class EventResourceTest extends DbIsolatedTest {
             .thenReturn(kesselTestHelper.buildCheckResponse(allowed));
     }
 
-    @Test
-    void testEventLogEntriesIncludeSeverity() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testEventLogEntriesIncludeSeverity(boolean useNormalizedQueries) {
+        when(backendConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
         Header defaultIdentityHeader = mockRbac(DEFAULT_ACCOUNT_ID, DEFAULT_ORG_ID, DEFAULT_USER, FULL_ACCESS);
 
         Bundle bundle = resourceHelpers.createBundle("test-bundle", "Test Bundle");

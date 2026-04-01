@@ -1,5 +1,6 @@
 package com.redhat.cloud.notifications.db.repositories;
 
+import com.redhat.cloud.notifications.config.EngineConfig;
 import com.redhat.cloud.notifications.models.Event;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -21,6 +22,9 @@ public class EventRepository {
     @Inject
     EntityManager entityManager;
 
+    @Inject
+    EngineConfig engineConfig;
+
     @Transactional
     public Event create(Event event) {
         entityManager.persist(event);
@@ -38,18 +42,37 @@ public class EventRepository {
      */
     public List<Event> findEventsToExport(final String orgId, final LocalDate from, final LocalDate to) {
         final StringBuilder findEventsQuery = new StringBuilder();
-        findEventsQuery.append(
-            "SELECT NEW com.redhat.cloud.notifications.models.Event( " +
-                "e.id, " +
-                "e.bundleDisplayName, " +
-                "e.applicationDisplayName, " +
-                "e.eventTypeDisplayName, " +
-                "e.created) " +
-            "FROM " +
-                "Event AS e " +
-            "WHERE " +
-                "e.orgId = :orgId"
-        );
+
+        if (engineConfig.isNormalizedQueriesEnabled(orgId)) {
+            findEventsQuery.append(
+                "SELECT NEW com.redhat.cloud.notifications.models.Event( " +
+                    "e.id, " +
+                    "bundle.displayName, " +
+                    "app.displayName, " +
+                    "et.displayName, " +
+                    "e.created) " +
+                "FROM " +
+                    "Event AS e " +
+                "JOIN e.eventType et " +
+                "JOIN et.application app " +
+                "JOIN app.bundle bundle " +
+                "WHERE " +
+                    "e.orgId = :orgId"
+            );
+        } else {
+            findEventsQuery.append(
+                "SELECT NEW com.redhat.cloud.notifications.models.Event( " +
+                    "e.id, " +
+                    "e.bundleDisplayName, " +
+                    "e.applicationDisplayName, " +
+                    "e.eventTypeDisplayName, " +
+                    "e.created) " +
+                "FROM " +
+                    "Event AS e " +
+                "WHERE " +
+                    "e.orgId = :orgId"
+            );
+        }
 
         final Map<String, Object> parameters = new HashMap<>();
         parameters.put("orgId", orgId);

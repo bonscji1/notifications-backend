@@ -51,6 +51,7 @@ public class BackendConfig {
     private String sourcesOidcAuthToggle;
     private String toggleUseBetaTemplatesEnabled;
     private String showHiddenEventTypesToggle;
+    private String normalizedQueriesToggle;
 
     @ConfigProperty(name = UNLEASH, defaultValue = "false")
     @Deprecated(forRemoval = true, since = "To be removed when we're done migrating to Unleash in all environments")
@@ -130,6 +131,7 @@ public class BackendConfig {
         sourcesOidcAuthToggle = toggleRegistry.register("sources-oidc-auth", true);
         toggleUseBetaTemplatesEnabled = toggleRegistry.register("use-beta-templates", true);
         showHiddenEventTypesToggle = toggleRegistry.register("show-hidden-event-types", true);
+        normalizedQueriesToggle = toggleRegistry.register("normalized-queries", true);
     }
 
     void logConfigAtStartup(@Observes Startup event) {
@@ -314,6 +316,14 @@ public class BackendConfig {
     public boolean isShowHiddenEventTypes(String orgId) {
         if (unleashEnabled) {
             return unleash.isEnabled(showHiddenEventTypesToggle, buildUnleashContextWithOrgId(orgId), false);
+        } else {
+            return false;
+        }
+    }
+
+    public boolean isNormalizedQueriesEnabled(String orgId) {
+        if (unleashEnabled) {
+            return unleash.isEnabled(normalizedQueriesToggle, buildUnleashContextWithOrgId(orgId), false);
         } else {
             return false;
         }

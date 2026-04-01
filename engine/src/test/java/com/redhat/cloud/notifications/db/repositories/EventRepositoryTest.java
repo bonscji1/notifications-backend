@@ -1,11 +1,13 @@
 package com.redhat.cloud.notifications.db.repositories;
 
 import com.redhat.cloud.notifications.TestLifecycleManager;
+import com.redhat.cloud.notifications.config.EngineConfig;
 import com.redhat.cloud.notifications.db.ResourceHelpers;
 import com.redhat.cloud.notifications.models.Application;
 import com.redhat.cloud.notifications.models.Bundle;
 import com.redhat.cloud.notifications.models.Event;
 import com.redhat.cloud.notifications.models.EventType;
+import io.quarkus.test.InjectMock;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -14,7 +16,8 @@ import jakarta.transaction.Transactional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -25,6 +28,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static com.redhat.cloud.notifications.TestConstants.DEFAULT_ORG_ID;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 
 @QuarkusTest
 @QuarkusTestResource(TestLifecycleManager.class)
@@ -45,6 +50,9 @@ public class EventRepositoryTest {
 
     @Inject
     ResourceHelpers resourceHelpers;
+
+    @InjectMock
+    EngineConfig engineConfig;
 
     /**
      * Inserts five event fixtures in the database. The fixtures then get
@@ -96,9 +104,13 @@ public class EventRepositoryTest {
     /**
      * Tests that when no date ranges are provided all the events related to
      * the org id are fetched.
+     * Tests both denormalized (false) and normalized (true) query modes.
      */
-    @Test
-    void testGetAll() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testGetAll(boolean useNormalizedQueries) {
+        when(engineConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
+
         final List<Event> result = this.eventRepository.findEventsToExport(DEFAULT_ORG_ID, null, null);
 
         Assertions.assertEquals(this.createdEvents.size(), result.size(), "unexpected number of fetched events");
@@ -111,9 +123,13 @@ public class EventRepositoryTest {
     /**
      * Tests that when just the "from" date is provided, the events are
      * filtered as expected.
+     * Tests both denormalized (false) and normalized (true) query modes.
      */
-    @Test
-    void testGetJustFrom() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testGetJustFrom(boolean useNormalizedQueries) {
+        when(engineConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
+
         final LocalDate fourDaysAgo = TODAY.minusDays(4);
 
         final List<Event> result = this.eventRepository.findEventsToExport(DEFAULT_ORG_ID, fourDaysAgo, null);
@@ -138,9 +154,13 @@ public class EventRepositoryTest {
     /**
      * Tests that when just the "to" date is provided, the events are filtered
      * as expected.
+     * Tests both denormalized (false) and normalized (true) query modes.
      */
-    @Test
-    void testGetJustTo() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testGetJustTo(boolean useNormalizedQueries) {
+        when(engineConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
+
         final LocalDate threeDaysAgo = TODAY.minusDays(3);
 
         final List<Event> result = this.eventRepository.findEventsToExport(DEFAULT_ORG_ID, null, threeDaysAgo);
@@ -164,9 +184,13 @@ public class EventRepositoryTest {
     /**
      * Tests that when a date range is provided, only the events that comply
      * with that range are fetched.
+     * Tests both denormalized (false) and normalized (true) query modes.
      */
-    @Test
-    void testGetDateRange() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testGetDateRange(boolean useNormalizedQueries) {
+        when(engineConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
+
         final LocalDate fourDaysAgo = TODAY.minusDays(4);
         final LocalDate threeDaysAgo = TODAY.minusDays(3);
 

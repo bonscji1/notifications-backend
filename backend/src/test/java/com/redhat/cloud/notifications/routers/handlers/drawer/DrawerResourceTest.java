@@ -25,7 +25,8 @@ import io.restassured.specification.RequestSpecification;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -42,6 +43,7 @@ import static io.restassured.http.ContentType.JSON;
 import static java.time.ZoneOffset.UTC;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 @QuarkusTest
@@ -60,9 +62,11 @@ public class DrawerResourceTest extends DbIsolatedTest {
     @InjectMock
     BackendConfig backendConfig;
 
-    @Test
-    void testMultiplePages() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testMultiplePages(boolean useNormalizedQueries) {
         when(backendConfig.isDrawerEnabled()).thenReturn(true);
+        when(backendConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
         final String USERNAME = "user-1";
         Header defaultIdentityHeader = mockRbac(DEFAULT_ACCOUNT_ID, DEFAULT_ORG_ID, USERNAME, FULL_ACCESS);
 
@@ -100,9 +104,11 @@ public class DrawerResourceTest extends DbIsolatedTest {
         assertTrue(page.getLinks().get("last").contains("limit=3&offset=27"));
     }
 
-    @Test
-    void testFilters() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFilters(boolean useNormalizedQueries) {
         when(backendConfig.isDrawerEnabled()).thenReturn(true);
+        when(backendConfig.isNormalizedQueriesEnabled(anyString())).thenReturn(useNormalizedQueries);
         Bundle createdBundle = resourceHelpers.createBundle("test-drawer-event-resource-bundle");
         Bundle createdBundle2 = resourceHelpers.createBundle("test-drawer-event-resource-bundle2");
         Application createdApplication = resourceHelpers.createApplication(createdBundle.getId(), "test-drawer-event-resource-application");
