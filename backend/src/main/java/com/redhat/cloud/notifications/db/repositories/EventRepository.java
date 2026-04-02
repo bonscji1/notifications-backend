@@ -47,7 +47,19 @@ public class EventRepository {
         boolean applicationsNotEmpty = appIds != null && !appIds.isEmpty();
         boolean eventTypeNameNotEmpty = eventTypeDisplayName != null;
 
-        String hql = "FROM Event e WHERE e.orgId = :orgId";
+        String hql = "FROM Event e ";
+
+        // Add selective JOINs for normalized approach - only join what we need
+        if (useNormalized && (bundlesNotEmpty || applicationsNotEmpty)) {
+            hql += "JOIN e.eventType et ";
+            hql += "JOIN et.application app ";
+
+            if (bundlesNotEmpty) {
+                hql += "JOIN app.bundle bundle ";
+            }
+        }
+
+        hql += "WHERE e.orgId = :orgId";
 
         hql = addHqlConditions(hql, useNormalized, bundlesNotEmpty, applicationsNotEmpty, eventTypeNameNotEmpty, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, null, Optional.empty(), true);
         // we are looking for events with auth criterion only
@@ -72,33 +84,45 @@ public class EventRepository {
         boolean useNormalized = backendConfig.isNormalizedQueriesEnabled(orgId);
         Optional<Sort> sort = Sort.getSort(query, "created:DESC", Event.getSortFields(useNormalized));
 
-        List<UUID> eventIds = getEventIds(orgId, bundleIds, appIds, eventTypeDisplayName, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, severities, query, uuidToExclude, includeEventsWithAuthCriterion);
+        List<UUID> eventIds = getEventIds(orgId, useNormalized, bundleIds, appIds, eventTypeDisplayName, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, severities, query, uuidToExclude, includeEventsWithAuthCriterion);
         if (eventIds.isEmpty()) {
             return new ArrayList<>();
         }
 
-        boolean needsJoins = useNormalized && sort.isPresent() &&
-            !sort.get().getSortColumn().equals("e.created");
+        // Determine which JOINs are needed for sorting
+        String joinClause = "";
+        if (useNormalized && sort.isPresent()) {
+            String sortColumn = sort.get().getSortColumn();
+            if (!sortColumn.equals("e.created")) {
+                // Determine table dependencies for sorting
+                boolean needsBundle = sortColumn.startsWith("bundle.");
+                boolean needsApp = needsBundle || sortColumn.startsWith("app.");
+                boolean needsEventType = needsApp || sortColumn.startsWith("et.");
+
+                // Add selective JOINs (order matters - FK chain: e → et → app → bundle)
+                if (needsEventType) {
+                    joinClause += "JOIN e.eventType et ";
+                }
+                if (needsApp) {
+                    joinClause += "JOIN et.application app ";
+                }
+                if (needsBundle) {
+                    joinClause += "JOIN app.bundle bundle ";
+                }
+            }
+        }
 
         String hql;
         if (fetchNotificationHistory) {
             if (useNormalized) {
                 // Remove DISTINCT to allow ORDER BY with joined columns
                 // Deduplication happens naturally since we're fetching by specific event IDs
-                hql = "SELECT e FROM Event e ";
-                if (needsJoins) {
-                    hql += "JOIN e.eventType et JOIN et.application app JOIN app.bundle bundle ";
-                }
-                hql += "LEFT JOIN FETCH e.historyEntries he WHERE e.id IN (:eventIds)";
+                hql = "SELECT e FROM Event e " + joinClause + "LEFT JOIN FETCH e.historyEntries he WHERE e.id IN (:eventIds)";
             } else {
                 hql = "SELECT DISTINCT e FROM Event e LEFT JOIN FETCH e.historyEntries he WHERE e.id IN (:eventIds)";
             }
         } else {
-            hql = "FROM Event e ";
-            if (needsJoins) {
-                hql += "JOIN e.eventType et JOIN et.application app JOIN app.bundle bundle ";
-            }
-            hql += "WHERE e.id IN (:eventIds)";
+            hql = "FROM Event e " + joinClause + "WHERE e.id IN (:eventIds)";
         }
 
         if (sort.isPresent()) {
@@ -164,10 +188,9 @@ public class EventRepository {
         }
     }
 
-    private List<UUID> getEventIds(String orgId, Set<UUID> bundleIds, Set<UUID> appIds, String eventTypeDisplayName,
+    private List<UUID> getEventIds(String orgId, boolean useNormalized, Set<UUID> bundleIds, Set<UUID> appIds, String eventTypeDisplayName,
                                         LocalDate startDate, LocalDate endDate, Set<EndpointType> endpointTypes, Set<CompositeEndpointType> compositeEndpointTypes,
                                         Set<Boolean> invocationResults, Set<NotificationStatus> status, Set<Severity> severities, Query query, Optional<List<UUID>> uuidToExclude, boolean includeEventsWithAuthCriterion) {
-        boolean useNormalized = backendConfig.isNormalizedQueriesEnabled(orgId);
         boolean bundlesNotEmpty = bundleIds != null && !bundleIds.isEmpty();
         boolean applicationsNotEmpty = appIds != null && !appIds.isEmpty();
         boolean eventTypeNameNotEmpty = eventTypeDisplayName != null;
@@ -175,15 +198,24 @@ public class EventRepository {
 
         String hql = "SELECT e.id FROM Event e ";
 
-        boolean needsJoins = useNormalized && (
-            (sort.isPresent() && !sort.get().getSortColumn().equals("e.created")) ||
-            bundlesNotEmpty ||
-            applicationsNotEmpty ||
-            eventTypeNameNotEmpty
-        );
+        if (useNormalized) {
+            // Determine which JOINs are needed based on filters and sort
+            String sortColumn = sort.isPresent() ? sort.get().getSortColumn() : "";
 
-        if (needsJoins) {
-            hql += "JOIN e.eventType et JOIN et.application app JOIN app.bundle bundle ";
+            boolean needsBundle = bundlesNotEmpty || sortColumn.startsWith("bundle.");
+            boolean needsApp = applicationsNotEmpty || needsBundle || sortColumn.startsWith("app.");
+            boolean needsEventType = eventTypeNameNotEmpty || needsApp || sortColumn.startsWith("et.");
+
+            // Add selective JOINs (order matters - must follow FK chain: e → et → app → bundle)
+            if (needsEventType) {
+                hql += "JOIN e.eventType et ";
+            }
+            if (needsApp) {
+                hql += "JOIN et.application app ";
+            }
+            if (needsBundle) {
+                hql += "JOIN app.bundle bundle ";
+            }
         }
 
         hql += "WHERE e.orgId = :orgId";

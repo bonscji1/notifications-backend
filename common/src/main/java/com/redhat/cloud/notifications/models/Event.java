@@ -34,22 +34,22 @@ import static java.time.ZoneOffset.UTC;
 @Table(name = "event")
 public class Event {
 
+    private static final Map<String, String> SORT_FIELDS_NORMALIZED = Map.of(
+            "bundle", "bundle.displayName",
+            "application", "app.displayName",
+            "event", "et.displayName",
+            "created", "e.created"
+    );
+
+    private static final Map<String, String> SORT_FIELDS_DENORMALIZED = Map.of(
+            "bundle", "e.bundleDisplayName",
+            "application", "e.applicationDisplayName",
+            "event", "e.eventTypeDisplayName",
+            "created", "e.created"
+    );
+
     public static Map<String, String> getSortFields(boolean useNormalized) {
-        if (useNormalized) {
-            return Map.of(
-                    "bundle", "bundle.displayName",
-                    "application", "app.displayName",
-                    "event", "et.displayName",
-                    "created", "e.created"
-            );
-        } else {
-            return Map.of(
-                    "bundle", "e.bundleDisplayName",
-                    "application", "e.applicationDisplayName",
-                    "event", "e.eventTypeDisplayName",
-                    "created", "e.created"
-            );
-        }
+        return useNormalized ? SORT_FIELDS_NORMALIZED : SORT_FIELDS_DENORMALIZED;
     }
 
     @Id
