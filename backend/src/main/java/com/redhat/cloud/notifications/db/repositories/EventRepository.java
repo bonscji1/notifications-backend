@@ -50,13 +50,8 @@ public class EventRepository {
         String hql = "FROM Event e ";
 
         // Add selective JOINs for normalized approach - only join what we need
-        if (useNormalized && (bundlesNotEmpty || applicationsNotEmpty)) {
-            hql += "JOIN e.eventType et ";
-            hql += "JOIN et.application app ";
-
-            if (bundlesNotEmpty) {
-                hql += "JOIN app.bundle bundle ";
-            }
+        if (useNormalized) {
+            hql += "JOIN e.eventType et JOIN et.application app JOIN app.bundle bundle ";
         }
 
         hql += "WHERE e.orgId = :orgId";
@@ -69,6 +64,16 @@ public class EventRepository {
         setQueryParams(typedQuery, orgId, bundleIds, appIds, eventTypeDisplayName, startDate, endDate, endpointTypes, compositeEndpointTypes, invocationResults, status, null, Optional.empty());
 
         List<Event> eventsWithAuthorizationCriterion = typedQuery.getResultList();
+
+        // Populate denormalized display name fields from joined entities
+        if (useNormalized && !eventsWithAuthorizationCriterion.isEmpty()) {
+            for (Event event : eventsWithAuthorizationCriterion) {
+                event.setBundleDisplayName(event.getEventType().getApplication().getBundle().getDisplayName());
+                event.setApplicationDisplayName(event.getEventType().getApplication().getDisplayName());
+                event.setEventTypeDisplayName(event.getEventType().getDisplayName());
+            }
+        }
+
         List<EventAuthorizationCriterion> eventAuthorizationCriterion = new ArrayList<>();
         for (Event event : eventsWithAuthorizationCriterion) {
             eventAuthorizationCriterion.add(new EventAuthorizationCriterion(event.getId(), recipientsAuthorizationCriterionExtractor.extract(event)));
@@ -89,40 +94,23 @@ public class EventRepository {
             return new ArrayList<>();
         }
 
-        // Determine which JOINs are needed for sorting
-        String joinClause = "";
-        if (useNormalized && sort.isPresent()) {
-            String sortColumn = sort.get().getSortColumn();
-            if (!sortColumn.equals("e.created")) {
-                // Determine table dependencies for sorting
-                boolean needsBundle = sortColumn.startsWith("bundle.");
-                boolean needsApp = needsBundle || sortColumn.startsWith("app.");
-                boolean needsEventType = needsApp || sortColumn.startsWith("et.");
-
-                // Add selective JOINs (order matters - FK chain: e → et → app → bundle)
-                if (needsEventType) {
-                    joinClause += "JOIN e.eventType et ";
-                }
-                if (needsApp) {
-                    joinClause += "JOIN et.application app ";
-                }
-                if (needsBundle) {
-                    joinClause += "JOIN app.bundle bundle ";
-                }
-            }
-        }
-
         String hql;
-        if (fetchNotificationHistory) {
-            if (useNormalized) {
+        if (useNormalized) {
+            String joinClause = "JOIN e.eventType et JOIN et.application app JOIN app.bundle bundle ";
+
+            if (fetchNotificationHistory) {
                 // Remove DISTINCT to allow ORDER BY with joined columns
-                // Deduplication happens naturally since we're fetching by specific event IDs
                 hql = "SELECT e FROM Event e " + joinClause + "LEFT JOIN FETCH e.historyEntries he WHERE e.id IN (:eventIds)";
             } else {
-                hql = "SELECT DISTINCT e FROM Event e LEFT JOIN FETCH e.historyEntries he WHERE e.id IN (:eventIds)";
+                hql = "FROM Event e " + joinClause + "WHERE e.id IN (:eventIds)";
             }
+
         } else {
-            hql = "FROM Event e " + joinClause + "WHERE e.id IN (:eventIds)";
+            if (fetchNotificationHistory) {
+                hql = "SELECT DISTINCT e FROM Event e LEFT JOIN FETCH e.historyEntries he WHERE e.id IN (:eventIds)";
+            } else {
+                hql = "FROM Event e WHERE e.id IN (:eventIds)";
+            }
         }
 
         if (sort.isPresent()) {
@@ -133,12 +121,21 @@ public class EventRepository {
                 .setParameter("eventIds", eventIds)
                 .getResultList();
 
-        // LEFT JOIN FETCH on one-to-many can create duplicate Event objects
-        // Only deduplicate for normalized queries (denormalized already has SQL DISTINCT)
-        if (fetchNotificationHistory && useNormalized && !events.isEmpty()) {
-            return events.stream()
-                    .distinct()
-                    .collect(Collectors.toList());
+        if (useNormalized && !events.isEmpty()) {
+            // LEFT JOIN FETCH on one-to-many can create duplicate Event objects
+            // Only deduplicate for normalized queries (denormalized already has SQL DISTINCT)
+            if (fetchNotificationHistory) {
+                events = events.stream()
+                        .distinct()
+                        .collect(Collectors.toList());
+            }
+
+            // Populate denormalized display name fields from joined entities
+            for (Event event : events) {
+                event.setBundleDisplayName(event.getEventType().getApplication().getBundle().getDisplayName());
+                event.setApplicationDisplayName(event.getEventType().getApplication().getDisplayName());
+                event.setEventTypeDisplayName(event.getEventType().getDisplayName());
+            }
         }
 
         return events;
