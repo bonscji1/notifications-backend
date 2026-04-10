@@ -64,7 +64,6 @@ public class EmailAggregationProcessor extends SystemEndpointTypeProcessor {
 
     public static final String AGGREGATION_CONSUMED_TIMER_NAME = "aggregation.time.consumed";
     protected static final String TAG_KEY_BUNDLE = "bundle";
-    protected static final String TAG_KEY_APPLICATION = "application";
     protected static final String TAG_KEY_ORG_ID = "orgid";
 
     @Inject
@@ -200,20 +199,11 @@ public class EmailAggregationProcessor extends SystemEndpointTypeProcessor {
             Log.warn("Error while processing aggregation", e);
             failedAggregationCommandCount.increment();
         } finally {
-            if (aggregationCommands.size() == 1) {
-                consumedTimer.stop(registry.timer(
-                    AGGREGATION_CONSUMED_TIMER_NAME,
-                    TAG_KEY_BUNDLE, bundle,
-                    TAG_KEY_APPLICATION, aggregationCommands.get(0).getAggregationKey().getApplication(),
-                    TAG_KEY_ORG_ID, event.getOrgId()
-                ));
-            } else {
-                consumedTimer.stop(registry.timer(
-                    AGGREGATION_CONSUMED_TIMER_NAME,
-                    TAG_KEY_BUNDLE, bundle,
-                    TAG_KEY_ORG_ID, event.getOrgId()
-                ));
-            }
+            consumedTimer.stop(registry.timer(
+                AGGREGATION_CONSUMED_TIMER_NAME,
+                TAG_KEY_BUNDLE, bundle,
+                TAG_KEY_ORG_ID, event.getOrgId()
+            ));
         }
     }
 

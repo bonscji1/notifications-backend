@@ -69,6 +69,7 @@ public class EventConsumerTest {
     private static final String BUNDLE = "my-bundle";
     private static final String APP = "my-app";
     private static final String EVENT_TYPE = "my-event-type";
+    private static final String EVENT_TYPE_FQN = "";
 
     @Inject
     @Any
@@ -98,11 +99,17 @@ public class EventConsumerTest {
                 REJECTED_COUNTER_NAME,
                 PROCESSING_ERROR_COUNTER_NAME,
                 PROCESSING_EXCEPTION_COUNTER_NAME,
-                DUPLICATE_EVENT_COUNTER_NAME,
                 MESSAGE_ID_VALID_COUNTER_NAME,
                 MESSAGE_ID_INVALID_COUNTER_NAME,
-                MESSAGE_ID_MISSING_COUNTER_NAME,
-                PROCESSING_BLACKLISTED_COUNTER_NAME
+                MESSAGE_ID_MISSING_COUNTER_NAME
+        );
+        micrometerAssertionHelper.saveCounterValueWithTagsBeforeTest(
+            DUPLICATE_EVENT_COUNTER_NAME,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE
+        );
+        micrometerAssertionHelper.saveCounterValueWithTagsBeforeTest(
+            PROCESSING_BLACKLISTED_COUNTER_NAME,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE, TAG_KEY_EVENT_TYPE_FQN, EVENT_TYPE_FQN
         );
         micrometerAssertionHelper.removeDynamicTimer(CONSUMED_TIMER_NAME);
 
@@ -136,9 +143,10 @@ public class EventConsumerTest {
                 PROCESSING_ERROR_COUNTER_NAME,
                 PROCESSING_EXCEPTION_COUNTER_NAME,
                 MESSAGE_ID_INVALID_COUNTER_NAME,
-                MESSAGE_ID_MISSING_COUNTER_NAME,
-                PROCESSING_BLACKLISTED_COUNTER_NAME
+                MESSAGE_ID_MISSING_COUNTER_NAME
         );
+        micrometerAssertionHelper.assertCounterIncrementWithTags(PROCESSING_BLACKLISTED_COUNTER_NAME, 0,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE, TAG_KEY_EVENT_TYPE_FQN, EVENT_TYPE_FQN);
 
         final Event processedEvent = verifyExactlyOneProcessing(eventType, payload, action, true);
         verifySeverity(action, false);
@@ -199,9 +207,10 @@ public class EventConsumerTest {
                 PROCESSING_ERROR_COUNTER_NAME,
                 PROCESSING_EXCEPTION_COUNTER_NAME,
                 MESSAGE_ID_VALID_COUNTER_NAME,
-                MESSAGE_ID_INVALID_COUNTER_NAME,
-                PROCESSING_BLACKLISTED_COUNTER_NAME
+                MESSAGE_ID_INVALID_COUNTER_NAME
         );
+        micrometerAssertionHelper.assertCounterIncrementWithTags(PROCESSING_BLACKLISTED_COUNTER_NAME, 0,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE, TAG_KEY_EVENT_TYPE_FQN, EVENT_TYPE_FQN);
         verifyExactlyOneProcessing(eventType, payload, action, false);
         verify(eventDeduplicator, times(1)).isNew(any(Event.class));
     }
@@ -226,9 +235,10 @@ public class EventConsumerTest {
                 PROCESSING_ERROR_COUNTER_NAME,
                 PROCESSING_EXCEPTION_COUNTER_NAME,
                 MESSAGE_ID_INVALID_COUNTER_NAME,
-                MESSAGE_ID_MISSING_COUNTER_NAME,
-                PROCESSING_BLACKLISTED_COUNTER_NAME
+                MESSAGE_ID_MISSING_COUNTER_NAME
         );
+        micrometerAssertionHelper.assertCounterIncrementWithTags(PROCESSING_BLACKLISTED_COUNTER_NAME, 0,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE, TAG_KEY_EVENT_TYPE_FQN, EVENT_TYPE_FQN);
         verifySeverity(action, severityIgnored);
     }
 
@@ -245,9 +255,10 @@ public class EventConsumerTest {
                 PROCESSING_ERROR_COUNTER_NAME,
                 MESSAGE_ID_VALID_COUNTER_NAME,
                 MESSAGE_ID_INVALID_COUNTER_NAME,
-                MESSAGE_ID_MISSING_COUNTER_NAME,
-                PROCESSING_BLACKLISTED_COUNTER_NAME
+                MESSAGE_ID_MISSING_COUNTER_NAME
         );
+        micrometerAssertionHelper.assertCounterIncrementWithTags(PROCESSING_BLACKLISTED_COUNTER_NAME, 0,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE, TAG_KEY_EVENT_TYPE_FQN, EVENT_TYPE_FQN);
         verify(endpointProcessor, never()).process(any(Event.class));
         verify(eventDeduplicator, never()).isNew(any(Event.class));
     }
@@ -267,9 +278,10 @@ public class EventConsumerTest {
         assertNoCounterIncrement(
                 PROCESSING_ERROR_COUNTER_NAME,
                 MESSAGE_ID_VALID_COUNTER_NAME,
-                MESSAGE_ID_INVALID_COUNTER_NAME,
-                PROCESSING_BLACKLISTED_COUNTER_NAME
+                MESSAGE_ID_INVALID_COUNTER_NAME
         );
+        micrometerAssertionHelper.assertCounterIncrementWithTags(PROCESSING_BLACKLISTED_COUNTER_NAME, 0,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE, TAG_KEY_EVENT_TYPE_FQN, EVENT_TYPE_FQN);
         verify(endpointProcessor, never()).process(any(Event.class));
         verify(eventDeduplicator, never()).isNew(any(Event.class));
     }
@@ -289,9 +301,10 @@ public class EventConsumerTest {
         assertNoCounterIncrement(
                 REJECTED_COUNTER_NAME,
                 MESSAGE_ID_VALID_COUNTER_NAME,
-                MESSAGE_ID_INVALID_COUNTER_NAME,
-                PROCESSING_BLACKLISTED_COUNTER_NAME
+                MESSAGE_ID_INVALID_COUNTER_NAME
         );
+        micrometerAssertionHelper.assertCounterIncrementWithTags(PROCESSING_BLACKLISTED_COUNTER_NAME, 0,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE, TAG_KEY_EVENT_TYPE_FQN, EVENT_TYPE_FQN);
         verifyExactlyOneProcessing(eventType, payload, action, false);
         verify(eventDeduplicator, times(1)).isNew(any(Event.class));
     }
@@ -309,16 +322,17 @@ public class EventConsumerTest {
         micrometerAssertionHelper.awaitAndAssertTimerIncrement(CONSUMED_TIMER_NAME, 2);
         assertEquals(2L, getTimerCount(action.getBundle(), action.getApplication(), action.getEventType()));
         micrometerAssertionHelper.assertCounterIncrement(MESSAGE_ID_VALID_COUNTER_NAME, 2);
-        // TODO DUPLICATE_EVENT_COUNTER_NAME will be increased to 1 when kafkaMessageDeduplicator is removed.
-        micrometerAssertionHelper.assertCounterIncrement(DUPLICATE_EVENT_COUNTER_NAME, 0);
+        micrometerAssertionHelper.assertCounterIncrementWithTags(DUPLICATE_EVENT_COUNTER_NAME, 1,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE);
         assertNoCounterIncrement(
                 REJECTED_COUNTER_NAME,
                 PROCESSING_ERROR_COUNTER_NAME,
                 PROCESSING_EXCEPTION_COUNTER_NAME,
                 MESSAGE_ID_INVALID_COUNTER_NAME,
-                MESSAGE_ID_MISSING_COUNTER_NAME,
-                PROCESSING_BLACKLISTED_COUNTER_NAME
+                MESSAGE_ID_MISSING_COUNTER_NAME
         );
+        micrometerAssertionHelper.assertCounterIncrementWithTags(PROCESSING_BLACKLISTED_COUNTER_NAME, 0,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE, TAG_KEY_EVENT_TYPE_FQN, EVENT_TYPE_FQN);
         verifyExactlyOneProcessing(eventType, payload, action, false);
         verify(eventDeduplicator, times(2)).isNew(any(Event.class));
 
@@ -340,9 +354,10 @@ public class EventConsumerTest {
                 PROCESSING_ERROR_COUNTER_NAME,
                 PROCESSING_EXCEPTION_COUNTER_NAME,
                 MESSAGE_ID_VALID_COUNTER_NAME,
-                MESSAGE_ID_INVALID_COUNTER_NAME,
-                PROCESSING_BLACKLISTED_COUNTER_NAME
+                MESSAGE_ID_INVALID_COUNTER_NAME
         );
+        micrometerAssertionHelper.assertCounterIncrementWithTags(PROCESSING_BLACKLISTED_COUNTER_NAME, 0,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE, TAG_KEY_EVENT_TYPE_FQN, EVENT_TYPE_FQN);
         verifyExactlyOneProcessing(eventType, payload, action, false);
         verify(eventDeduplicator, times(1)).isNew(any(Event.class));
     }
@@ -363,9 +378,10 @@ public class EventConsumerTest {
                 PROCESSING_ERROR_COUNTER_NAME,
                 PROCESSING_EXCEPTION_COUNTER_NAME,
                 MESSAGE_ID_VALID_COUNTER_NAME,
-                MESSAGE_ID_MISSING_COUNTER_NAME,
-                PROCESSING_BLACKLISTED_COUNTER_NAME
+                MESSAGE_ID_MISSING_COUNTER_NAME
         );
+        micrometerAssertionHelper.assertCounterIncrementWithTags(PROCESSING_BLACKLISTED_COUNTER_NAME, 0,
+            TAG_KEY_BUNDLE, BUNDLE, TAG_KEY_APPLICATION, APP, TAG_KEY_EVENT_TYPE, EVENT_TYPE, TAG_KEY_EVENT_TYPE_FQN, EVENT_TYPE_FQN);
         verifyExactlyOneProcessing(eventType, payload, action, false);
         verify(eventDeduplicator, times(1)).isNew(any(Event.class));
     }

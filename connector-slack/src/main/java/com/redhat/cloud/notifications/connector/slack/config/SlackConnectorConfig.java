@@ -1,6 +1,6 @@
 package com.redhat.cloud.notifications.connector.slack.config;
 
-import com.redhat.cloud.notifications.connector.http.HttpConnectorConfig;
+import com.redhat.cloud.notifications.connector.v2.http.HttpConnectorConfig;
 import io.getunleash.UnleashContext;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;

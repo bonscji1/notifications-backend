@@ -79,16 +79,20 @@ Every new repository method that accesses tenant data must follow this pattern.
 
 ## 4. SSRF Prevention
 
-### 4.1 `@ValidNonPrivateUrl` Custom Validator
+### 4.1 `@ValidNonPrivateUrl` Custom Validator (DTO/API Layer)
 - All user-supplied webhook/camel URLs **must** be annotated with `@ValidNonPrivateUrl`.
-- This validator (in `common` module) checks:
+- The backing validator `ValidNonPrivateUrlValidator` (in `common` module) checks at **DTO/API validation time**:
   - URL is well-formed (valid URL and URI)
   - Scheme is `http` or `https` only (rejects `ftp://`, etc.)
-  - Hostname does not resolve to a private/site-local IP (192.168.x.x, 172.16.x.x, 10.x.x.x)
+  - Hostname does not resolve to a private/site-local IP (uses `InetAddress.isSiteLocalAddress()` which covers 192.168.x.x, 172.16-31.x.x, 10.x.x.x ranges)
   - Hostname does not resolve to a loopback address (127.x.x.x, localhost) in non-dev/test modes
   - Hostname resolves to a known host
 - Applied on: `WebhookPropertiesDTO.url`, `CamelPropertiesDTO.url`
 - New endpoint types that accept user-supplied URLs must use this annotation.
+
+### 4.1.1 Connector-Side URL Validation
+- `connector-common-http`'s `UrlValidator.java` (`UrlValidator.validateTargetUrl()`) performs **scheme-only validation** (requires `https`) at connector execution time. It does **not** perform hostname resolution, private IP, or loopback checks.
+- If full private-network/loopback SSRF protections are required at the connector layer (e.g. to guard against DNS rebinding or TOCTOU between DTO validation and connector execution), host/IP checks must be implemented separately in the connector pipeline.
 
 ### 4.2 Webhook HTTP Method Restriction
 - `WebhookPropertiesDTO` restricts the HTTP method to POST only via `@AssertTrue` validation on `isHttpMethodAllowed()`.
@@ -131,7 +135,7 @@ Every new repository method that accesses tenant data must follow this pattern.
 ## 7. Kessel gRPC Client Resilience
 
 The `KesselCheckClient` implements specific resilience patterns:
-- **Timeout**: All gRPC calls use a configurable deadline (`notifications.kessel.timeout-ms`, default 30s).
+- **Timeout**: All gRPC calls use a configurable deadline (`notifications.kessel.timeout-ms`, default 30000ms).
 - **Retry**: 3 retries with 100ms delay on transient failures (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `RESOURCE_EXHAUSTED`, `ABORTED`).
 - **Token refresh**: On `UNAUTHENTICATED` errors, the gRPC channel is recreated with fresh OAuth2 credentials (cache is cleared).
 - **Channel health**: If the gRPC channel enters `SHUTDOWN` state, it is automatically recreated.
@@ -147,7 +151,7 @@ The `KesselCheckClient` implements specific resilience patterns:
 
 When reviewing or implementing changes:
 
-1. Most public endpoint methods should have `@Authorization` with both `legacyRBACRole` and `workspacePermissions` (exceptions include endpoints marked with `@Tag(name = OApiFilter.PRIVATE)`).
+1. Public endpoint methods should have `@Authorization` with both `legacyRBACRole` and `workspacePermissions` (exceptions include endpoints marked with `@Tag(name = OApiFilter.PRIVATE)`).
 2. Every internal endpoint method has `@RolesAllowed` with appropriate admin/user role.
 3. Every database query for tenant data includes `orgId` in the WHERE clause.
 4. User-supplied URLs use `@ValidNonPrivateUrl`.

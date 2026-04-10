@@ -77,7 +77,7 @@ Each module has its own `ResourceHelpers` class for creating test entities. The 
 - `createBundle()`, `createApplication()`, `createEventType()` -- core domain entities
 - `createWebhookEndpoint()`, `createEndpoint()` -- integration endpoints
 - `createBehaviorGroup()`, `createDefaultBehaviorGroup()` -- behavior groups
-- `createTemplate()`, `createInstantEmailTemplate()`, `createAggregationEmailTemplate()` -- templates
+- `createTemplate()`, `createInstantEmailTemplate()`, `createAggregationEmailTemplate()` -- templates (see `docs/template-guidelines.md` for template testing patterns)
 
 The `common`, `engine`, and `aggregator` modules have their own `ResourceHelpers` variants with module-specific methods.
 

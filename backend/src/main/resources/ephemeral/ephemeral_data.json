@@ -141,7 +141,7 @@
         },
         {
           "name": "patch",
-          "display_name": "Patch",
+          "display_name": "Content",
           "event_types": [
             {
               "name": "new-advisory",

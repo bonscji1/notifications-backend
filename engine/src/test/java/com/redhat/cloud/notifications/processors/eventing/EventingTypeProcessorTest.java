@@ -101,7 +101,7 @@ class EventingTypeProcessorTest {
     MicrometerAssertionHelper micrometerAssertionHelper;
 
     @Inject
-    EventingProcessor camelProcessor;
+    EventingProcessor eventingProcessor;
 
     @Inject
     ResourceHelpers resourceHelpers;
@@ -122,7 +122,7 @@ class EventingTypeProcessorTest {
     @BeforeEach
     void beforeEach() {
         inMemorySink.clear();
-        micrometerAssertionHelper.saveCounterValueWithTagsBeforeTest(EventingProcessor.PROCESSED_COUNTER_NAME, SUB_TYPE_KEY);
+        micrometerAssertionHelper.saveCounterValueWithTagsBeforeTest(EventingProcessor.PROCESSED_COUNTER_NAME, SUB_TYPE_KEY, SUB_TYPE);
     }
 
     @AfterEach
@@ -142,7 +142,7 @@ class EventingTypeProcessorTest {
         Endpoint endpoint2 = buildCamelEndpoint(event.getEventWrapper().getAccountId());
 
         // Let's trigger the processing.
-        camelProcessor.process(event, List.of(endpoint1, endpoint2));
+        eventingProcessor.process(event, List.of(endpoint1, endpoint2));
         ArgumentCaptor<NotificationHistory> historyArgumentCaptor = ArgumentCaptor.forClass(NotificationHistory.class);
         verify(notificationHistoryRepository, times(2)).createNotificationHistory(historyArgumentCaptor.capture());
         List<NotificationHistory> result = historyArgumentCaptor.getAllValues();
@@ -150,9 +150,8 @@ class EventingTypeProcessorTest {
         // Two endpoints should have been processed.
         assertEquals(2, result.size());
         // Metrics should report the same thing.
-        micrometerAssertionHelper.assertCounterIncrement(EventingProcessor.PROCESSED_COUNTER_NAME, 2, SUB_TYPE_KEY, SUB_TYPE);
-        micrometerAssertionHelper.assertCounterIncrement(EventingProcessor.PROCESSED_COUNTER_NAME, 0, SUB_TYPE_KEY, "other-type");
-        micrometerAssertionHelper.assertCounterIncrement(EventingProcessor.PROCESSED_COUNTER_NAME, 0);
+        micrometerAssertionHelper.assertCounterIncrementWithTags(EventingProcessor.PROCESSED_COUNTER_NAME, 2, SUB_TYPE_KEY, SUB_TYPE);
+        micrometerAssertionHelper.assertCounterIncrementWithTags(EventingProcessor.PROCESSED_COUNTER_NAME, 0, SUB_TYPE_KEY, "other-type");
 
         // Let's have a look at the first result entry fields.
         assertEquals(event, result.get(0).getEvent());
@@ -203,8 +202,8 @@ class EventingTypeProcessorTest {
     void testEmailsOnlyModeCamelProcessor() {
         when(engineConfig.isEmailsOnlyModeEnabled()).thenReturn(true);
 
-        camelProcessor.process(buildEvent(), List.of(new Endpoint()));
-        micrometerAssertionHelper.assertCounterIncrement(EventingProcessor.PROCESSED_COUNTER_NAME, 0);
+        eventingProcessor.process(buildEvent(), List.of(new Endpoint()));
+        micrometerAssertionHelper.assertCounterIncrementWithTags(EventingProcessor.PROCESSED_COUNTER_NAME, 0, SUB_TYPE_KEY, SUB_TYPE);
     }
 
     @Test
@@ -218,7 +217,7 @@ class EventingTypeProcessorTest {
         endpoint.setSubType("splunk");
 
         // Let's trigger the processing.
-        camelProcessor.process(event, List.of(endpoint));
+        eventingProcessor.process(event, List.of(endpoint));
         ArgumentCaptor<NotificationHistory> historyArgumentCaptor = ArgumentCaptor.forClass(NotificationHistory.class);
         verify(notificationHistoryRepository, times(1)).createNotificationHistory(historyArgumentCaptor.capture());
         List<NotificationHistory> result = historyArgumentCaptor.getAllValues();

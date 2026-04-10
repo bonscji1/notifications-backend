@@ -33,6 +33,7 @@
         <module>connector-webhook</module>
         <module>database</module>
         <module>engine</module>
+        <module>mcp</module>
         <module>recipients-resolver</module>
     </modules>
 
@@ -69,7 +70,7 @@
         <testcontainers.version>2.0.4</testcontainers.version>
         <version.cloud-commons>0.1.1</version.cloud-commons>
         <openapi-parser.version>4.0.4</openapi-parser.version>
-        <swagger-v3-core.version>2.2.46</swagger-v3-core.version>
+        <swagger-v3-core.version>2.2.47</swagger-v3-core.version>
         <failsafe.version>3.3.2</failsafe.version>
 
         <wiremock.version>3.13.2</wiremock.version>
@@ -79,11 +80,12 @@
 
         <quarkus-logging-cloudwatch.version>6.16.0</quarkus-logging-cloudwatch.version>
         <quarkus-logging-sentry.version>2.3.1</quarkus-logging-sentry.version>
+        <quarkus-mcp-server.version>1.11.1</quarkus-mcp-server.version>
         <quarkus-unleash.version>1.13.0</quarkus-unleash.version>
 
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.32.4</quarkus.platform.version>
+        <quarkus.platform.version>3.34.3</quarkus.platform.version>
         <redhat.event-schemas.version>1.5.0</redhat.event-schemas.version>
         <com.networknt.json-schema-validator.version>2.0.1</com.networknt.json-schema-validator.version>
 

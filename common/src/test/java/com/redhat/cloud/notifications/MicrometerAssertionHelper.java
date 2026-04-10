@@ -41,18 +41,18 @@ public class MicrometerAssertionHelper {
         }
     }
 
-    public void saveCounterValueWithTagsBeforeTest(String counterName, String... tagKeys) {
+    public void saveCounterValueWithTagsBeforeTest(String counterName, String... tags) {
         Collection<Counter> counters = registry.find(counterName)
-            .tagKeys(tagKeys)
-                    .counters();
+            .tags(tags)
+            .counters();
         for (Counter counter : counters) {
             Meter.Id id = counter.getId();
-            List<String> tags = new ArrayList<>();
+            List<String> tagList = new ArrayList<>();
             for (Tag tag : id.getTags()) {
-                tags.add(tag.getKey());
-                tags.add(tag.getValue());
+                tagList.add(tag.getKey());
+                tagList.add(tag.getValue());
             }
-            counterValuesBeforeTest.put(counterName + tags, registry.counter(counterName, id.getTags()).count());
+            counterValuesBeforeTest.put(counterName + tagList, registry.counter(counterName, id.getTags()).count());
         }
     }
 
@@ -93,6 +93,28 @@ public class MicrometerAssertionHelper {
     public void assertCounterIncrement(String counterName, double expectedIncrement) {
         double actualIncrement = registry.counter(counterName).count() - counterValuesBeforeTest.getOrDefault(counterName, 0D);
         assertEquals(expectedIncrement, actualIncrement);
+    }
+
+    public void assertCounterIncrementWithTags(String counterName, double expectedIncrement, String... tags) {
+        Collection<Counter> counters = registry.find(counterName)
+            .tags(tags)
+            .counters();
+        if (counters.isEmpty()) {
+            // Counter was never registered (e.g. never incremented) — only valid when expecting 0.
+            assertEquals(0D, expectedIncrement,
+                String.format("No counters found for '%s' with tags %s, but expected a non-zero increment", counterName, Arrays.toString(tags)));
+            return;
+        }
+        for (Counter counter : counters) {
+            Meter.Id id = counter.getId();
+            List<String> tagList = new ArrayList<>();
+            for (Tag tag : id.getTags()) {
+                tagList.add(tag.getKey());
+                tagList.add(tag.getValue());
+            }
+            double actualIncrement = counter.count() - counterValuesBeforeTest.getOrDefault(counterName + tagList, 0D);
+            assertEquals(expectedIncrement, actualIncrement);
+        }
     }
 
     public void awaitAndAssertCounterIncrement(String counterName, double expectedIncrement) {
