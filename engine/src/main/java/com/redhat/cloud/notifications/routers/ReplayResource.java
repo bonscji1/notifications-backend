@@ -56,7 +56,7 @@ public class ReplayResource {
 
     public List<Event> getEvents(String orgId, LocalDateTime startDate, LocalDateTime endDate, EndpointType endpointType, String endpointSubType, int firstResult, int maxResults) {
 
-        String hql = "FROM Event e JOIN FETCH e.eventType " +
+        String hql = "FROM Event e JOIN FETCH e.eventType et JOIN FETCH et.application app JOIN FETCH app.bundle bundle " +
                 "WHERE e.created > :start AND e.created <= :end " +
                 "AND EXISTS (SELECT 1 FROM NotificationHistory " +
                 "WHERE e = event AND compositeEndpointType.type = :endpointType AND (compositeEndpointType.subType is null or compositeEndpointType.subType = :endpointSubType) AND status = :failed) " +

@@ -51,7 +51,7 @@ public class EventRepository {
 
         // Add selective JOINs for normalized approach - only join what we need
         if (useNormalized) {
-            hql += "JOIN e.eventType et JOIN et.application app JOIN app.bundle bundle ";
+            hql += "JOIN FETCH e.eventType et JOIN FETCH et.application app JOIN FETCH app.bundle bundle ";
         }
 
         hql += "WHERE e.orgId = :orgId";
@@ -96,7 +96,7 @@ public class EventRepository {
 
         String hql;
         if (useNormalized) {
-            String joinClause = "JOIN e.eventType et JOIN et.application app JOIN app.bundle bundle ";
+            String joinClause = "JOIN FETCH e.eventType et JOIN FETCH et.application app JOIN FETCH app.bundle bundle ";
 
             if (fetchNotificationHistory) {
                 // Remove DISTINCT to allow ORDER BY with joined columns
