@@ -49,6 +49,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -63,6 +64,7 @@ import static com.redhat.cloud.notifications.processors.email.EmailAggregationPr
 import static com.redhat.cloud.notifications.processors.email.EmailAggregationProcessor.AGGREGATION_CONSUMED_TIMER_NAME;
 import static java.time.ZoneOffset.UTC;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -555,11 +557,11 @@ class EmailAggregationProcessorTest {
     @Test
     void shouldRecomputeApplicationServicesGlobalReleasesNumberAfterTrimming() {
         String orgId = RandomStringUtils.secure().nextAlphanumeric(6);
-        Application app = resourceHelpers.findOrCreateApplication("rhel", "application-services");
+        Application app = resourceHelpers.findOrCreateApplication("subscription-services", "application-services");
         EventType eventType = resourceHelpers.findOrCreateEventType(app.getId(), "keycloak-releases");
         resourceHelpers.createEventTypeEmailSubscription(orgId, "releaseSubscriber", eventType, DAILY);
 
-        EventAggregationCriterion aggregationKey = new EventAggregationCriterion(orgId, app.getBundleId(), app.getId(), "rhel", "application-services");
+        EventAggregationCriterion aggregationKey = new EventAggregationCriterion(orgId, app.getBundleId(), app.getId(), "subscription-services", "application-services");
         AggregationCommand command = new AggregationCommand(aggregationKey, LocalDateTime.now(UTC).minusDays(1), LocalDateTime.now(UTC).plusDays(1), DAILY);
         // 3 payloads folded, but only one is tagged for this eventType -- global_releases_number must
         // reflect what survives trimming (1), not what the aggregator folded (3), proving the number is
@@ -578,6 +580,195 @@ class EmailAggregationProcessorTest {
         Map<?, ?> aggregatedData = (Map<?, ?>) appEntry.get("aggregated_data");
         Map<?, ?> applicationServices = (Map<?, ?>) aggregatedData.get("application-services");
         assertEquals(1, applicationServices.get("global_releases_number"));
+    }
+
+    @Test
+    void shouldRecomputePatchTotalAdvisoriesAfterTrimming() {
+        String orgId = RandomStringUtils.secure().nextAlphanumeric(6);
+        Application app = resourceHelpers.findOrCreateApplication("rhel", "patch");
+        EventType eventType = resourceHelpers.findOrCreateEventType(app.getId(), "new-advisory");
+        resourceHelpers.createEventTypeEmailSubscription(orgId, "patchSubscriber", eventType, DAILY);
+
+        EventAggregationCriterion aggregationKey = new EventAggregationCriterion(orgId, app.getBundleId(), app.getId(), "rhel", "patch");
+        AggregationCommand command = new AggregationCommand(aggregationKey, LocalDateTime.now(UTC).minusDays(1), LocalDateTime.now(UTC).plusDays(1), DAILY);
+
+        JsonObject securityAdvisory = taggedAdvisory("RH-1", eventType);
+        JsonObject bugfixAdvisory = taggedAdvisory("RH-2", eventType);
+        // The stale total proves the number is recomputed after trimming rather than forwarded.
+        command.setAggregatedData(new JsonObject()
+            .put("patch", new JsonObject()
+                .put("security", new JsonArray().add(securityAdvisory))
+                .put("bugfix", new JsonArray().add(bugfixAdvisory))
+                .put("enhancement", new JsonArray())
+                .put("other", new JsonArray()))
+            .put("total_advisories", 99)
+            .getMap());
+
+        inMemoryConnector.source(INGRESS_CHANNEL).send(buildAggregatorAction(List.of(command)));
+
+        ArgumentCaptor<JsonObject> argumentCaptor = ArgumentCaptor.forClass(JsonObject.class);
+        verify(connectorSender, timeout(5000L)).send(any(Event.class), any(Endpoint.class), argumentCaptor.capture());
+        EmailNotification notification = argumentCaptor.getValue().mapTo(EmailNotification.class);
+        assertTrue(notification.subscribers().contains("patchSubscriber"));
+
+        List<?> appDataList = (List<?>) notification.eventData().get("application_aggregated_data_list");
+        Map<?, ?> aggregatedData = (Map<?, ?>) ((Map<?, ?>) appDataList.get(0)).get("aggregated_data");
+        assertEquals(2, aggregatedData.get("total_advisories"));
+        Map<?, ?> patch = (Map<?, ?>) aggregatedData.get("patch");
+        Map<?, ?> advisory = (Map<?, ?>) ((List<?>) patch.get("security")).get(0);
+        assertEquals("RH-1", advisory.get("name"));
+        assertFalse(advisory.containsKey("_eventType"), "tags must be stripped from the dispatched content");
+    }
+
+    @Test
+    void shouldCollapseVulnerabilityEntriesIntoUniqueCvesAfterTrimming() {
+        String orgId = RandomStringUtils.secure().nextAlphanumeric(6);
+        Application app = resourceHelpers.findOrCreateApplication("rhel", "vulnerability");
+        EventType subscribedEventType = resourceHelpers.findOrCreateEventType(app.getId(), "new-cve-cvss");
+        EventType otherEventType = resourceHelpers.findOrCreateEventType(app.getId(), "any-cve-known-exploit");
+        resourceHelpers.createEventTypeEmailSubscription(orgId, "vulnerabilitySubscriber", subscribedEventType, DAILY);
+
+        EventAggregationCriterion aggregationKey = new EventAggregationCriterion(orgId, app.getBundleId(), app.getId(), "rhel", "vulnerability");
+        AggregationCommand command = new AggregationCommand(aggregationKey, LocalDateTime.now(UTC).minusDays(1), LocalDateTime.now(UTC).plusDays(1), DAILY);
+        // CVE-1 was reported by both event types, CVE-2 only by the one nobody subscribed to: the subscriber
+        // must get CVE-1 once and never see CVE-2.
+        command.setAggregatedData(new JsonObject()
+            .put("vulnerability", new JsonObject()
+                .put("reported_cves", new JsonArray()
+                    .add(taggedCve("CVE-1", subscribedEventType))
+                    .add(taggedCve("CVE-1", otherEventType))
+                    .add(taggedCve("CVE-2", otherEventType))))
+            .getMap());
+
+        inMemoryConnector.source(INGRESS_CHANNEL).send(buildAggregatorAction(List.of(command)));
+
+        ArgumentCaptor<JsonObject> argumentCaptor = ArgumentCaptor.forClass(JsonObject.class);
+        verify(connectorSender, timeout(5000L)).send(any(Event.class), any(Endpoint.class), argumentCaptor.capture());
+        EmailNotification notification = argumentCaptor.getValue().mapTo(EmailNotification.class);
+        assertTrue(notification.subscribers().contains("vulnerabilitySubscriber"));
+
+        List<?> appDataList = (List<?>) notification.eventData().get("application_aggregated_data_list");
+        Map<?, ?> aggregatedData = (Map<?, ?>) ((Map<?, ?>) appDataList.get(0)).get("aggregated_data");
+        Map<?, ?> vulnerability = (Map<?, ?>) aggregatedData.get("vulnerability");
+        assertEquals(List.of("CVE-1"), vulnerability.get("reported_cves"));
+    }
+
+    @Test
+    void shouldDeriveResourceOptimizationStatesFromTheLatestEntryPerSystemAfterTrimming() {
+        String orgId = RandomStringUtils.secure().nextAlphanumeric(6);
+        Application app = resourceHelpers.findOrCreateApplication("rhel", "resource-optimization");
+        EventType subscribedEventType = resourceHelpers.findOrCreateEventType(app.getId(), "new-suggestion");
+        EventType otherEventType = resourceHelpers.findOrCreateEventType(app.getId(), "other-suggestion");
+        resourceHelpers.createEventTypeEmailSubscription(orgId, "rosSubscriber", subscribedEventType, DAILY);
+
+        EventAggregationCriterion aggregationKey = new EventAggregationCriterion(orgId, app.getBundleId(), app.getId(), "rhel", "resource-optimization");
+        AggregationCommand command = new AggregationCommand(aggregationKey, LocalDateTime.now(UTC).minusDays(1), LocalDateTime.now(UTC).plusDays(1), DAILY);
+        // The newest entry of system-1 belongs to an event type the recipient isn't subscribed to, so the
+        // recipient's latest state for it is the older IDLING one, and the newest overall entry they can see
+        // is the one with 20 systems_with_suggestions.
+        command.setAggregatedData(new JsonObject()
+            .put("aggregated_data", new JsonObject()
+                .put("system_states", new JsonArray()
+                    .add(taggedSystemState("system-1", "IDLING", 10, 0, subscribedEventType))
+                    .add(taggedSystemState("system-2", "UNKNOWN", 20, 1, subscribedEventType))
+                    .add(taggedSystemState("system-1", "UNDER_PRESSURE", 30, 2, otherEventType))))
+            .getMap());
+
+        inMemoryConnector.source(INGRESS_CHANNEL).send(buildAggregatorAction(List.of(command)));
+
+        ArgumentCaptor<JsonObject> argumentCaptor = ArgumentCaptor.forClass(JsonObject.class);
+        verify(connectorSender, timeout(5000L)).send(any(Event.class), any(Endpoint.class), argumentCaptor.capture());
+        EmailNotification notification = argumentCaptor.getValue().mapTo(EmailNotification.class);
+        assertTrue(notification.subscribers().contains("rosSubscriber"));
+
+        List<?> appDataList = (List<?>) notification.eventData().get("application_aggregated_data_list");
+        Map<?, ?> aggregatedData = (Map<?, ?>) ((Map<?, ?>) ((Map<?, ?>) appDataList.get(0)).get("aggregated_data")).get("aggregated_data");
+        assertEquals(2, aggregatedData.get("systems_triggered"));
+        assertEquals(20, aggregatedData.get("systems_with_suggestions"));
+        Set<String> states = new HashSet<>();
+        for (Object state : (List<?>) aggregatedData.get("states")) {
+            states.add(((Map<?, ?>) state).get("state") + "=" + ((Map<?, ?>) state).get("system_count"));
+        }
+        assertEquals(Set.of("IDLING=1", "UNKNOWN=1"), states);
+        assertFalse(aggregatedData.containsKey("system_states"));
+    }
+
+    @Test
+    void shouldReplayAdvisorRecommendationsOverTheEventsTheRecipientKeptAfterTrimming() {
+        String orgId = RandomStringUtils.secure().nextAlphanumeric(6);
+        Application app = resourceHelpers.findOrCreateApplication("rhel", "advisor");
+        EventType subscribedEventType = resourceHelpers.findOrCreateEventType(app.getId(), "new-recommendation");
+        EventType otherEventType = resourceHelpers.findOrCreateEventType(app.getId(), "resolved-recommendation");
+        resourceHelpers.createEventTypeEmailSubscription(orgId, "advisorSubscriber", subscribedEventType, DAILY);
+
+        EventAggregationCriterion aggregationKey = new EventAggregationCriterion(orgId, app.getBundleId(), app.getId(), "rhel", "advisor");
+        AggregationCommand command = new AggregationCommand(aggregationKey, LocalDateTime.now(UTC).minusDays(1), LocalDateTime.now(UTC).plusDays(1), DAILY);
+        // The resolved-recommendation entry belongs to an event type the recipient isn't subscribed to.
+        command.setAggregatedData(new JsonObject()
+            .put("advisor", new JsonObject()
+                .put("recommendation_events", new JsonArray()
+                    .add(taggedRecommendation("new-recommendation", "rule-1", "true", 0, subscribedEventType))
+                    .add(taggedRecommendation("new-recommendation", "rule-1", "true", 1, subscribedEventType))
+                    .add(taggedRecommendation("resolved-recommendation", "rule-2", "false", 2, otherEventType))))
+            .getMap());
+
+        inMemoryConnector.source(INGRESS_CHANNEL).send(buildAggregatorAction(List.of(command)));
+
+        ArgumentCaptor<JsonObject> argumentCaptor = ArgumentCaptor.forClass(JsonObject.class);
+        verify(connectorSender, timeout(5000L)).send(any(Event.class), any(Endpoint.class), argumentCaptor.capture());
+        EmailNotification notification = argumentCaptor.getValue().mapTo(EmailNotification.class);
+        assertTrue(notification.subscribers().contains("advisorSubscriber"));
+
+        List<?> appDataList = (List<?>) notification.eventData().get("application_aggregated_data_list");
+        Map<?, ?> advisor = (Map<?, ?>) ((Map<?, ?>) ((Map<?, ?>) appDataList.get(0)).get("aggregated_data")).get("advisor");
+        assertEquals(1, advisor.get("total_recommendation"));
+        assertEquals(1, advisor.get("total_incident"));
+        assertFalse(advisor.containsKey("resolved_recommendations"));
+        assertFalse(advisor.containsKey("recommendation_events"));
+        Map<?, ?> rule = (Map<?, ?>) ((Map<?, ?>) advisor.get("new_recommendations")).get("rule-1");
+        assertEquals(2, rule.get("systems"));
+    }
+
+    private static JsonObject taggedRecommendation(String eventType, String ruleId, String incident, int order, EventType dbEventType) {
+        return new JsonObject()
+            .put("event_type", eventType)
+            .put("rule_id", ruleId)
+            .put("rule_description", "description of " + ruleId)
+            .put("total_risk", "3")
+            .put("has_incident", incident)
+            .put("rule_url", "https://example.com/" + ruleId)
+            .put("_order", order)
+            .put("_eventType", dbEventType.getName())
+            .put("_eventTypeId", dbEventType.getId().toString())
+            .put("_subscribedByDefault", false);
+    }
+
+    private static JsonObject taggedSystemState(String inventoryId, String state, int systemsWithSuggestions, int order, EventType eventType) {
+        return new JsonObject()
+            .put("inventory_id", inventoryId)
+            .put("current_state", state)
+            .put("systems_with_suggestions", systemsWithSuggestions)
+            .put("_order", order)
+            .put("_eventType", eventType.getName())
+            .put("_eventTypeId", eventType.getId().toString())
+            .put("_subscribedByDefault", false);
+    }
+
+    private static JsonObject taggedCve(String cve, EventType eventType) {
+        return new JsonObject()
+            .put("cve", cve)
+            .put("_eventType", eventType.getName())
+            .put("_eventTypeId", eventType.getId().toString())
+            .put("_subscribedByDefault", false);
+    }
+
+    private static JsonObject taggedAdvisory(String name, EventType eventType) {
+        return new JsonObject()
+            .put("name", name)
+            .put("synopsis", "synopsis")
+            .put("_eventType", eventType.getName())
+            .put("_eventTypeId", eventType.getId().toString())
+            .put("_subscribedByDefault", false);
     }
 
     private static Map<String, Object> buildApplicationServicesFoldedData(EventType eventType, int releaseCount) {

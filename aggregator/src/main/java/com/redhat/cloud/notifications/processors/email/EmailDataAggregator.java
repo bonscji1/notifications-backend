@@ -48,13 +48,13 @@ public class EmailDataAggregator {
     /**
      * Folds every event for the given app into one shared context.
      *
-     * @return the folded context, or {@code null} if the app has no fold-only aggregator yet (see
+     * @return the folded context, or {@code null} if the app has no fold-only aggregator (see
      *         {@link EmailPayloadAggregatorFactory}) or there was nothing to fold.
      */
     public Map<String, Object> getAggregatedData(EventAggregationCriterion aggregationKey, LocalDateTime start, LocalDateTime end) {
         AbstractEmailPayloadAggregator aggregator = EmailPayloadAggregatorFactory.by(aggregationKey);
         if (aggregator == null) {
-            Log.debugf("No fold-only aggregator available yet for %s, skipping", aggregationKey);
+            Log.debugf("No fold-only aggregator available for %s, skipping", aggregationKey);
             return null;
         }
 

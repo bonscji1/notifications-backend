@@ -584,10 +584,10 @@ class DailyEventAggregationJobTest {
     }
 
     @Test
-    void shouldNotEnrichPayloadWhenFoldEnabledForAppWithoutAFoldOnlyAggregatorYet() {
+    void shouldNotEnrichPayloadWhenFoldEnabledForAppWithoutAFoldOnlyAggregator() {
         when(aggregatorConfig.isAggregatorEventPreprocessingEnabled(eq("someOrgId"))).thenReturn(true);
 
-        addEventEmailAggregation("someOrgId", "rhel", "advisor", "somePolicyId", "someHostId");
+        addEventEmailAggregation("someOrgId", "rhel", "app-without-aggregator", "somePolicyId", "someHostId");
         dailyEmailAggregationJob.setDefaultDailyDigestTime(baseReferenceTime.toLocalTime());
 
         dailyEmailAggregationJob.processDailyEmail();
@@ -599,7 +599,7 @@ class DailyEventAggregationJobTest {
 
         AggregationCommand command = objectMapper.convertValue(
             action.getEvents().get(0).getPayload().getAdditionalProperties(), AggregationCommand.class);
-        assertNull(command.getAggregatedData(), "engine should fold advisor itself until ticket 1b ports it");
+        assertNull(command.getAggregatedData(), "an app without a fold-only aggregator must be left for engine to fold itself");
     }
 
     @Test

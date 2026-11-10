@@ -21,6 +21,26 @@ class EmailPayloadAggregatorFactoryTest {
     }
 
     @Test
+    void shouldReturnPatchAggregatorForRhelPatch() {
+        assertInstanceOf(PatchEmailPayloadAggregator.class, EmailPayloadAggregatorFactory.by(criterion("rhel", "patch")));
+    }
+
+    @Test
+    void shouldReturnVulnerabilityAggregatorForRhelVulnerability() {
+        assertInstanceOf(VulnerabilityEmailPayloadAggregator.class, EmailPayloadAggregatorFactory.by(criterion("rhel", "vulnerability")));
+    }
+
+    @Test
+    void shouldReturnResourceOptimizationAggregatorForRhelResourceOptimization() {
+        assertInstanceOf(ResourceOptimizationPayloadAggregator.class, EmailPayloadAggregatorFactory.by(criterion("rhel", "resource-optimization")));
+    }
+
+    @Test
+    void shouldReturnAdvisorAggregatorForRhelAdvisor() {
+        assertInstanceOf(AdvisorEmailAggregator.class, EmailPayloadAggregatorFactory.by(criterion("rhel", "advisor")));
+    }
+
+    @Test
     void shouldReturnErrataAggregatorForSubscriptionServicesErrata() {
         assertInstanceOf(ErrataEmailPayloadAggregator.class, EmailPayloadAggregatorFactory.by(criterion("subscription-services", "errata-notifications")));
     }
@@ -31,11 +51,7 @@ class EmailPayloadAggregatorFactoryTest {
     }
 
     @Test
-    void shouldReturnNullForAppsNotPortedYet() {
-        assertNull(EmailPayloadAggregatorFactory.by(criterion("rhel", "advisor")));
-        assertNull(EmailPayloadAggregatorFactory.by(criterion("rhel", "patch")));
-        assertNull(EmailPayloadAggregatorFactory.by(criterion("rhel", "resource-optimization")));
-        assertNull(EmailPayloadAggregatorFactory.by(criterion("rhel", "vulnerability")));
+    void shouldReturnNullForAppsWithoutAnAggregator() {
         assertNull(EmailPayloadAggregatorFactory.by(criterion("application-services", "ansible")));
     }
 

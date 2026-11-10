@@ -19,6 +19,8 @@ import com.redhat.cloud.notifications.processors.ConnectorSender;
 import com.redhat.cloud.notifications.processors.SystemEndpointTypeProcessor;
 import com.redhat.cloud.notifications.processors.email.connector.dto.EmailNotification;
 import com.redhat.cloud.notifications.processors.email.connector.dto.RecipientSettings;
+import com.redhat.cloud.notifications.processors.email.finalizers.AggregatedDataFinalizer;
+import com.redhat.cloud.notifications.processors.email.finalizers.AggregatedDataFinalizerFactory;
 import com.redhat.cloud.notifications.recipients.User;
 import com.redhat.cloud.notifications.utils.ActionParser;
 import io.micrometer.core.instrument.Counter;
@@ -59,10 +61,6 @@ public class EmailAggregationProcessor extends SystemEndpointTypeProcessor {
     protected static final String TAG_KEY_BUNDLE = "bundle";
     protected static final String TAG_KEY_ORG_ID = "orgid";
 
-    private static final String APPLICATION_SERVICES_APP_NAME = "application-services";
-    private static final String PRODUCTS_KEY = "products";
-    private static final String PAYLOADS_KEY = "payloads";
-    private static final String GLOBAL_RELEASES_NUMBER_KEY = "global_releases_number";
 
     @Inject
     EmailActorsResolver emailActorsResolver;
@@ -254,42 +252,14 @@ public class EmailAggregationProcessor extends SystemEndpointTypeProcessor {
             Map<User, Map<String, Object>> trimmed = aggregatedDataTrimmer.trim(
                 aggregationCommand.getOrgId(), aggregationCommand.getAggregationKey(),
                 aggregationCommand.getSubscriptionType(), aggregatedData);
-            if (APPLICATION_SERVICES_APP_NAME.equals(aggregationCommand.getAggregationKey().getApplication())) {
-                trimmed.values().forEach(this::recomputeApplicationServicesGlobalReleasesNumber);
-            }
+            AggregatedDataFinalizer finalizer = AggregatedDataFinalizerFactory.by(aggregationCommand.getAggregationKey());
+            trimmed.values().forEach(finalizer::finalizeData);
             return trimmed;
         }
 
         return emailAggregator.getAggregated(
             appId, aggregationCommand.getAggregationKey(),
             aggregationCommand.getSubscriptionType(), aggregationCommand.getStart(), aggregationCommand.getEnd());
-    }
-
-    /*
-     * Aggregator's fold-only pipeline doesn't track global_releases_number at all (see
-     * ApplicationServicesEmailPayloadAggregator in the aggregator module): it folds every recipient's
-     * events into one superset, so any running total it kept would already be wrong for every recipient
-     * whose trimmed view differs from the full digest. The only place the correct per-recipient count can
-     * be known is right here, after trimming, so it's recomputed from the already-trimmed products map --
-     * exactly what the legacy per-recipient aggregator's own running counter amounted to, just computed
-     * once at the end instead of incrementally during the fold.
-     */
-    @SuppressWarnings("unchecked")
-    private void recomputeApplicationServicesGlobalReleasesNumber(Map<String, Object> dataByApp) {
-        if (!(dataByApp.get(APPLICATION_SERVICES_APP_NAME) instanceof Map<?, ?> rawAppData)) {
-            return;
-        }
-        Map<String, Object> applicationServices = (Map<String, Object>) rawAppData;
-        if (!(applicationServices.get(PRODUCTS_KEY) instanceof Map<?, ?> products)) {
-            return;
-        }
-        int releasesCount = 0;
-        for (Object product : products.values()) {
-            if (product instanceof Map<?, ?> productData && productData.get(PAYLOADS_KEY) instanceof List<?> payloads) {
-                releasesCount += payloads.size();
-            }
-        }
-        applicationServices.put(GLOBAL_RELEASES_NUMBER_KEY, releasesCount);
     }
 
     /*
